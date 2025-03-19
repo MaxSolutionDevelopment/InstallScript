@@ -14,6 +14,24 @@
 # ./odoo-install
 ################################################################################
 
+echo "Enter the website name (domain):"
+read WEBSITE_NAME
+echo "Do you want to install Odoo Enterprise? (y/n)"
+read install_enterprise
+echo "Input github username: "
+read github_user
+echo "Input github PAT token: "
+read github_pat
+if [ "$install_enterprise" = "y" ]; then
+    IS_ENTERPRISE="True"
+    echo "Enter Enterprise repository clone URL (including authentication if private, e.g., https://<token>@github.com/<user>/<repo>.git):"
+    read enterprise_repo_url
+else
+    IS_ENTERPRISE="False"
+fi
+echo "Enter Custom addon repository clone URL (including authentication if private, e.g., https://<token>@github.com/<user>/<repo>.git):"
+read custom_addon_url
+
 OE_USER="odoo"
 OE_HOME="/$OE_USER"
 OE_HOME_EXT="/$OE_USER/${OE_USER}-server"
@@ -24,7 +42,7 @@ INSTALL_WKHTMLTOPDF="True"
 OE_PORT="8069"
 # Choose the Odoo version which you want to install. For example: 16.0, 15.0, 14.0 or saas-22. When using 'master' the master version will be installed.
 # IMPORTANT! This script contains extra libraries that are specifically needed for Odoo 17.0
-OE_VERSION="17.0"
+OE_VERSION="18.0"
 # Set this to True if you want to install the Odoo enterprise version!
 IS_ENTERPRISE="False"
 # Installs postgreSQL V14 instead of defaults (e.g V12 for Ubuntu 20/22) - this improves performance
@@ -79,11 +97,11 @@ sudo apt-get install libpq-dev
 #--------------------------------------------------
 echo -e "\n---- Install PostgreSQL Server ----"
 if [ $INSTALL_POSTGRESQL_FOURTEEN = "True" ]; then
-    echo -e "\n---- Installing postgreSQL V14 due to the user it's choise ----"
-    sudo curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc|sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
+    echo -e "\n---- Install PostgreSQL 15 ----"
     sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+    wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
     sudo apt-get update
-    sudo apt-get install postgresql-16
+    sudo apt-get install -y postgresql-15
 else
     echo -e "\n---- Installing the default postgreSQL version based on Linux version ----"
     sudo apt-get install postgresql postgresql-server-dev-all -y
@@ -99,9 +117,13 @@ sudo su - postgres -c "createuser -s $OE_USER" 2> /dev/null || true
 echo -e "\n--- Installing Python 3 + pip3 --"
 sudo apt-get install python3 python3-pip
 sudo apt-get install git python3-cffi build-essential wget python3-dev python3-venv python3-wheel libxslt-dev libzip-dev libldap2-dev libsasl2-dev python3-setuptools node-less libpng-dev libjpeg-dev gdebi -y
+echo -e "\n---- Create virtual environment ----"
+sudo su - $OE_USER -c "python3 -m venv $OE_HOME/venv"
+sudo su - $OE_USER -c "$OE_HOME/venv/bin/pip install --upgrade pip"
+sudo su - $OE_USER -c "$OE_HOME/venv/bin/pip install -r https://github.com/odoo/odoo/raw/18.0/requirements.txt"
 
 echo -e "\n---- Install python packages/requirements ----"
-sudo -H pip3 install -r https://github.com/odoo/odoo/raw/${OE_VERSION}/requirements.txt
+# sudo -H pip3 install -r https://github.com/odoo/odoo/raw/${OE_VERSION}/requirements.txt
 
 echo -e "\n---- Installing nodeJS NPM and rtlcss for LTR support ----"
 sudo apt-get install nodejs npm -y
@@ -156,9 +178,8 @@ if [ $IS_ENTERPRISE = "True" ]; then
     echo -e "\n--- Create symlink for node"
     sudo ln -s /usr/bin/nodejs /usr/bin/node
     sudo su $OE_USER -c "mkdir $OE_HOME/enterprise"
-    sudo su $OE_USER -c "mkdir $OE_HOME/enterprise/addons"
 
-    GITHUB_RESPONSE=$(sudo git clone --depth 1 --branch $OE_VERSION https://www.github.com/odoo/enterprise "$OE_HOME/enterprise/addons" 2>&1)
+    GITHUB_RESPONSE=$(sudo git clone --depth 1 $enterprise_repo_url "$OE_HOME/enterprise" 2>&1)
     while [[ $GITHUB_RESPONSE == *"Authentication"* ]]; do
         echo "------------------------WARNING------------------------------"
         echo "Your authentication with Github has failed! Please try again."
@@ -166,7 +187,7 @@ if [ $IS_ENTERPRISE = "True" ]; then
         echo "TIP: Press ctrl+c to stop this script."
         echo "-------------------------------------------------------------"
         echo " "
-        GITHUB_RESPONSE=$(sudo git clone --depth 1 --branch $OE_VERSION https://www.github.com/odoo/enterprise "$OE_HOME/enterprise/addons" 2>&1)
+        GITHUB_RESPONSE=$(sudo git clone --depth 1 $enterprise_repo_url "$OE_HOME/enterprise" 2>&1)
     done
 
     echo -e "\n---- Added Enterprise code under $OE_HOME/enterprise/addons ----"
@@ -179,6 +200,13 @@ fi
 echo -e "\n---- Create custom module directory ----"
 sudo su $OE_USER -c "mkdir $OE_HOME/custom"
 sudo su $OE_USER -c "mkdir $OE_HOME/custom/addons"
+
+echo -e "\n---- Create custom module directory ----"
+sudo su - $OE_USER -c "mkdir -p $OE_HOME/custom/addons"
+if [ ! -z "$custom_addon_url" ]; then
+    echo -e "\n---- Cloning custom addons ----"
+    sudo su - $OE_USER -c "git clone $custom_addon_url $OE_HOME/custom/addons"
+fi
 
 echo -e "\n---- Setting permissions on home folder ----"
 sudo chown -R $OE_USER:$OE_USER $OE_HOME/*
